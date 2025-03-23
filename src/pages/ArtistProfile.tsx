@@ -1,94 +1,264 @@
-import React from 'react';
-import { useParams } from 'react-router-dom';
-import { Instagram, Twitter, Globe } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Instagram, Twitter, Globe, ArrowLeft } from 'lucide-react';
+import { motion } from 'framer-motion';
 import ArtworkCard from '../components/ArtworkCard';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+
+interface Artist {
+  id: string;
+  username: string;
+  full_name: string;
+  avatar_url: string;
+  bio: string;
+  website: string;
+  artworks_count: number;
+  followers_count: number;
+  following_count: number;
+  is_followed?: boolean;
+}
+
+interface Artwork {
+  id: number;
+  title: string;
+  description: string;
+  price: number;
+  image_url: string;
+  artist_id: string;
+  created_at: string;
+  artist: {
+    username: string;
+    full_name: string;
+  };
+}
 
 function ArtistProfile() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [artist, setArtist] = useState<Artist | null>(null);
+  const [artworks, setArtworks] = useState<Artwork[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isFollowing, setIsFollowing] = useState(false);
 
-  // Mock data - in a real app, fetch based on id
-  const artist = {
-    id: 1,
-    name: "Elena Chen",
-    image: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=400",
-    bio: "Digital artist specializing in abstract and surreal artwork. Based in San Francisco, CA.",
-    followers: 1200,
-    following: 245,
-    artworks: 24,
-    socialLinks: {
-      instagram: "https://instagram.com",
-      twitter: "https://twitter.com",
-      website: "https://example.com",
-    },
+  useEffect(() => {
+    const fetchArtistData = async () => {
+      if (!id) return;
+
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        // Fetch artist profile
+        const { data: artistData, error: artistError } = await supabase
+          .from('profiles')
+          .select(`
+            id,
+            username,
+            full_name,
+            avatar_url,
+            bio,
+            website,
+            artworks:artworks(count),
+            followers:follows!follows_following_id_fkey(count),
+            following:follows!follows_follower_id_fkey(count)
+          `)
+          .eq('id', id)
+          .single();
+
+        console.log('Artist data:', artistData);
+        console.log('Artist error:', artistError);
+
+        if (artistError) throw artistError;
+        if (!artistData) throw new Error('Artist not found');
+
+        // Check if the current user is following this artist
+        if (user) {
+          const { data: followData } = await supabase
+            .from('follows')
+            .select('id')
+            .eq('follower_id', user.id)
+            .eq('following_id', id)
+            .single();
+
+          setIsFollowing(!!followData);
+        }
+
+        // Fetch artist's artworks
+        const { data: artworksData, error: artworksError } = await supabase
+          .from('artworks')
+          .select(`
+            *,
+            artist:profiles(username, full_name)
+          `)
+          .eq('artist_id', id)
+          .order('created_at', { ascending: false });
+
+        console.log('Artworks data:', artworksData);
+        console.log('Artworks error:', artworksError);
+
+        if (artworksError) throw artworksError;
+
+        // Transform the data
+        const transformedArtist = {
+          ...artistData,
+          artworks_count: artistData.artworks?.[0]?.count || 0,
+          followers_count: artistData.followers?.[0]?.count || 0,
+          following_count: artistData.following?.[0]?.count || 0
+        };
+
+        console.log('Transformed artist:', transformedArtist);
+
+        setArtist(transformedArtist);
+        setArtworks(artworksData || []);
+      } catch (err) {
+        console.error('Error fetching artist data:', err);
+        setError(err instanceof Error ? err.message : 'Failed to fetch artist data');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchArtistData();
+  }, [id, user]);
+
+  const handleFollow = async () => {
+    if (!user || !artist) return;
+
+    try {
+      if (isFollowing) {
+        // Unfollow
+        await supabase
+          .from('follows')
+          .delete()
+          .eq('follower_id', user.id)
+          .eq('following_id', artist.id);
+      } else {
+        // Follow
+        await supabase
+          .from('follows')
+          .insert({
+            follower_id: user.id,
+            following_id: artist.id
+          });
+      }
+
+      setIsFollowing(!isFollowing);
+      // Update followers count
+      setArtist(prev => prev ? {
+        ...prev,
+        followers_count: prev.followers_count + (isFollowing ? -1 : 1)
+      } : null);
+    } catch (err) {
+      console.error('Error updating follow status:', err);
+    }
   };
 
-  const artworks = [
-    {
-      id: 1,
-      title: "Digital Dreams",
-      artist: "Elena Chen",
-      price: 299,
-      image: "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?auto=format&fit=crop&q=80&w=800",
-    },
-    {
-      id: 2,
-      title: "Neon Nights",
-      artist: "Elena Chen",
-      price: 199,
-      image: "https://images.unsplash.com/photo-1577083552431-6e5fd01aa342?auto=format&fit=crop&q=80&w=800",
-    },
-    {
-      id: 3,
-      title: "Abstract Flow",
-      artist: "Elena Chen",
-      price: 349,
-      image: "https://images.unsplash.com/photo-1549490349-8643362247b5?auto=format&fit=crop&q=80&w=800",
-    },
-  ];
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-black pt-20 flex justify-center items-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-white"></div>
+      </div>
+    );
+  }
+
+  if (error || !artist) {
+    return (
+      <div className="min-h-screen bg-black pt-20 px-4">
+        <div className="max-w-7xl mx-auto text-center py-12">
+          <h2 className="text-2xl text-white mb-4">Error</h2>
+          <p className="text-red-400">{error || 'Artist not found'}</p>
+          <button
+            onClick={() => navigate(-1)}
+            className="mt-6 px-6 py-3 bg-white text-black rounded-lg hover:bg-white/90 transition-colors"
+          >
+            Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="pt-20">
+    <div className="min-h-screen bg-black pt-20">
       <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
+        <button
+          onClick={() => navigate(-1)}
+          className="mb-8 inline-flex items-center gap-2 text-white hover:text-white/80 transition-colors"
+        >
+          <ArrowLeft className="w-5 h-5" />
+          Back
+        </button>
+
         {/* Artist Header */}
         <div className="flex flex-col md:flex-row gap-8 items-start mb-12">
-          <img
-            src={artist.image}
-            alt={artist.name}
-            className="w-32 h-32 rounded-full object-cover"
-          />
+          <div className="w-32 h-32 rounded-full overflow-hidden bg-white/5">
+            {artist.avatar_url ? (
+              <img
+                src={artist.avatar_url}
+                alt={artist.full_name || artist.username}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <span className="text-4xl text-white/30">
+                  {(artist.full_name || artist.username)[0].toUpperCase()}
+                </span>
+              </div>
+            )}
+          </div>
           <div className="flex-1">
             <div className="flex justify-between items-start">
               <div>
-                <h1 className="text-4xl font-bold tracking-tight mb-2">{artist.name}</h1>
-                <p className="text-gray-400 mb-4">{artist.bio}</p>
-                <div className="flex gap-4">
-                  <a href={artist.socialLinks.instagram} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-white">
-                    <Instagram className="w-5 h-5" />
-                  </a>
-                  <a href={artist.socialLinks.twitter} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-white">
-                    <Twitter className="w-5 h-5" />
-                  </a>
-                  <a href={artist.socialLinks.website} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-white">
-                    <Globe className="w-5 h-5" />
-                  </a>
-                </div>
+                <h1 className="text-4xl font-bold tracking-tight text-white mb-2">
+                  {artist.full_name || artist.username}
+                </h1>
+                <p className="text-gray-400 mb-2">@{artist.username}</p>
+                {artist.bio && (
+                  <p className="text-gray-300 mb-4">{artist.bio}</p>
+                )}
+                {artist.website && (
+                  <div className="flex gap-4">
+                    <a
+                      href={artist.website}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-gray-400 hover:text-white transition-colors"
+                    >
+                      <Globe className="w-5 h-5" />
+                    </a>
+                  </div>
+                )}
               </div>
-              <button className="px-6 py-2 bg-white text-black rounded-lg hover:bg-white/90 transition-colors">
-                Follow
-              </button>
+              {user && user.id !== artist.id && (
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={handleFollow}
+                  className={`px-6 py-2 rounded-lg font-medium transition-colors ${
+                    isFollowing
+                      ? 'bg-white/10 text-white hover:bg-white/20'
+                      : 'bg-white text-black hover:bg-white/90'
+                  }`}
+                >
+                  {isFollowing ? 'Following' : 'Follow'}
+                </motion.button>
+              )}
             </div>
             
             <div className="flex gap-8 mt-6">
               <div>
-                <p className="text-2xl font-bold">{artist.artworks}</p>
+                <p className="text-2xl font-bold text-white">{artist.artworks_count}</p>
                 <p className="text-gray-400">Artworks</p>
               </div>
               <div>
-                <p className="text-2xl font-bold">{artist.followers}</p>
+                <p className="text-2xl font-bold text-white">{artist.followers_count}</p>
                 <p className="text-gray-400">Followers</p>
               </div>
               <div>
-                <p className="text-2xl font-bold">{artist.following}</p>
+                <p className="text-2xl font-bold text-white">{artist.following_count}</p>
                 <p className="text-gray-400">Following</p>
               </div>
             </div>
@@ -96,11 +266,35 @@ function ArtistProfile() {
         </div>
 
         {/* Artist's Artworks */}
-        <h2 className="text-2xl font-bold mb-8">Latest Artworks</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {artworks.map((artwork) => (
-            <ArtworkCard key={artwork.id} artwork={artwork} />
-          ))}
+        <div>
+          <h2 className="text-2xl font-bold text-white mb-8">Latest Artworks</h2>
+          {artworks.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-gray-400">No artworks found.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {artworks.map((artwork) => (
+                <motion.div
+                  key={artwork.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5 }}
+                >
+                  <ArtworkCard
+                    artwork={{
+                      id: artwork.id,
+                      title: artwork.title,
+                      artist: artwork.artist.full_name || artwork.artist.username,
+                      price: artwork.price,
+                      image: artwork.image_url,
+                      artistId: artwork.artist_id
+                    }}
+                  />
+                </motion.div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

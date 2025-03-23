@@ -1,21 +1,47 @@
 -- PROFILES TABLE
--- Extends the auth.users table with additional profile information
+-- Base profile information for all users
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users(id) PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
   username TEXT UNIQUE,
   full_name TEXT,
   avatar_url TEXT,
   bio TEXT,
   website TEXT,
-  user_type TEXT NOT NULL DEFAULT 'buyer', -- Can be 'buyer', 'seller', or 'admin'
-  is_artist BOOLEAN DEFAULT false,
+  role TEXT NOT NULL CHECK (role IN ('buyer', 'seller', 'admin')),
   is_verified BOOLEAN DEFAULT false,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
 );
 
--- Enable RLS (Row Level Security)
+-- BUYER PROFILES TABLE
+-- Additional information specific to buyers
+CREATE TABLE IF NOT EXISTS public.buyer_profiles (
+  id UUID REFERENCES public.profiles(id) PRIMARY KEY,
+  favorite_artists UUID[] DEFAULT '{}',
+  purchase_history JSONB DEFAULT '[]',
+  saved_artworks UUID[] DEFAULT '{}',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
+);
+
+-- SELLER PROFILES TABLE
+-- Additional information specific to sellers
+CREATE TABLE IF NOT EXISTS public.seller_profiles (
+  id UUID REFERENCES public.profiles(id) PRIMARY KEY,
+  artist_bio TEXT,
+  portfolio_url TEXT,
+  social_links JSONB DEFAULT '{}',
+  total_sales INTEGER DEFAULT 0,
+  total_revenue DECIMAL(12, 2) DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
+);
+
+-- Enable RLS
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.buyer_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.seller_profiles ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for profiles
 CREATE POLICY "Public profiles are viewable by everyone" 
@@ -23,6 +49,20 @@ CREATE POLICY "Public profiles are viewable by everyone"
 
 CREATE POLICY "Users can update their own profile" 
   ON public.profiles FOR UPDATE USING (auth.uid() = id);
+
+-- RLS Policies for buyer profiles
+CREATE POLICY "Buyers can view their own profile" 
+  ON public.buyer_profiles FOR SELECT USING (auth.uid() = id);
+
+CREATE POLICY "Buyers can update their own profile" 
+  ON public.buyer_profiles FOR UPDATE USING (auth.uid() = id);
+
+-- RLS Policies for seller profiles
+CREATE POLICY "Seller profiles are viewable by everyone" 
+  ON public.seller_profiles FOR SELECT USING (true);
+
+CREATE POLICY "Sellers can update their own profile" 
+  ON public.seller_profiles FOR UPDATE USING (auth.uid() = id);
 
 -- ARTWORKS TABLE
 CREATE TABLE IF NOT EXISTS public.artworks (
@@ -213,19 +253,54 @@ CREATE POLICY "Public can verify their own invitations by token"
 -- FUNCTION: Handle New User Registration
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  user_role TEXT;
 BEGIN
-  INSERT INTO public.profiles (id, username, full_name, avatar_url)
+  -- Get the user role from metadata
+  user_role := COALESCE(NEW.raw_user_meta_data->>'role', 'buyer');
+
+  -- Create base profile
+  INSERT INTO public.profiles (
+    id,
+    email,
+    username,
+    full_name,
+    avatar_url,
+    role,
+    is_verified,
+    created_at,
+    updated_at
+  )
   VALUES (
-    NEW.id, 
-    NEW.raw_user_meta_data->>'username', 
-    NEW.raw_user_meta_data->>'full_name', 
-    NEW.raw_user_meta_data->>'avatar_url'
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'username', split_part(NEW.email, '@', 1)),
+    COALESCE(NEW.raw_user_meta_data->>'full_name', ''),
+    COALESCE(NEW.raw_user_meta_data->>'avatar_url', ''),
+    user_role,
+    false,
+    NOW(),
+    NOW()
   );
+
+  -- Create role-specific profile
+  IF user_role = 'buyer' THEN
+    INSERT INTO public.buyer_profiles (id)
+    VALUES (NEW.id);
+  ELSIF user_role = 'seller' THEN
+    INSERT INTO public.seller_profiles (id)
+    VALUES (NEW.id);
+  END IF;
+
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  RAISE LOG 'Error in handle_new_user: %', SQLERRM;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- TRIGGER: After User Registration
-CREATE OR REPLACE TRIGGER on_auth_user_created
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user(); 

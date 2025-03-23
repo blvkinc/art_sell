@@ -1,170 +1,259 @@
-import React, { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { ArrowLeft, Heart, Share2, ShoppingCart, Edit2 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Heart, Share2, Download } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import EditArtworkModal from '../components/EditArtworkModal';
 
-// Mock artwork data - would be fetched from an API in a real application
-const mockArtwork = {
-  id: '1',
-  title: 'Cosmic Wanderer',
-  description: 'A journey through the cosmos, exploring the beauty of distant nebulae and star systems.',
-  price: 0.85,
+interface Artwork {
+  id: string;
+  title: string;
+  description: string;
+  price: number;
+  image_url: string;
+  artist_id: string;
   artist: {
-    id: 'artist1',
-    name: 'Elena Cosmos',
-    avatar: 'https://randomuser.me/api/portraits/women/44.jpg',
-    bio: 'Digital artist specializing in cosmic and space-themed digital art'
-  },
-  imageUrl: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?ixlib=rb-1.2.1&auto=format&fit=crop&w=1000&q=80',
-  createdAt: '2023-05-15',
-  medium: 'Digital Art',
-  tags: ['space', 'cosmos', 'digital', 'nebula'],
-  edition: '1 of 10',
-  dimensions: '4000 x 3000 px',
-  licenseOptions: [
-    { id: '1', name: 'Personal Use', price: 0.85, description: 'Use for personal, non-commercial purposes' },
-    { id: '2', name: 'Commercial', price: 3.5, description: 'Use for commercial projects with attribution' },
-    { id: '3', name: 'Exclusive', price: 12.0, description: 'Full exclusive rights to the artwork' }
-  ]
-};
+    username: string;
+    full_name: string;
+    avatar_url: string;
+  };
+  tags: string[];
+  created_at: string;
+}
 
 const ArtworkDetail = () => {
   const { id } = useParams<{ id: string }>();
-  const [selectedLicense, setSelectedLicense] = useState(mockArtwork.licenseOptions[0].id);
-  const [showFullDescription, setShowFullDescription] = useState(false);
-  const [isLiked, setIsLiked] = useState(false);
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [artwork, setArtwork] = useState<Artwork | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
-  // This would fetch artwork data based on ID in a real application
-  const artwork = mockArtwork;
-  
-  const handleLicenseChange = (licenseId: string) => {
-    setSelectedLicense(licenseId);
+  useEffect(() => {
+    const fetchArtwork = async () => {
+      try {
+        console.log('Fetching artwork with ID:', id);
+        console.log('Current user:', user);
+
+        const { data, error } = await supabase
+          .from('artworks')
+          .select(`
+            *,
+            artist:profiles(
+              username,
+              full_name,
+              avatar_url
+            )
+          `)
+          .eq('id', id)
+          .single();
+
+        console.log('Supabase response:', { data, error });
+        console.log('Fetched artwork data:', data);
+
+        if (error) {
+          console.error('Error fetching artwork:', error);
+          throw error;
+        }
+
+        if (!data) {
+          console.error('No artwork found with ID:', id);
+          throw new Error('Artwork not found');
+        }
+
+        // Log the image URL specifically
+        console.log('Artwork image URL:', data.image_url);
+
+        setArtwork(data);
+      } catch (err) {
+        console.error('Error in fetchArtwork:', err);
+        setError(err instanceof Error ? err.message : 'Failed to fetch artwork');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchArtwork();
+  }, [id, user]);
+
+  const handleEdit = async (updatedArtwork: any) => {
+    try {
+      const { error } = await supabase
+        .from('artworks')
+        .update({
+          title: updatedArtwork.title,
+          description: updatedArtwork.description,
+          price: updatedArtwork.price,
+          tags: updatedArtwork.tags
+        })
+        .eq('id', updatedArtwork.id);
+
+      if (error) throw error;
+
+      setArtwork(prev => prev ? { ...prev, ...updatedArtwork } : null);
+    } catch (err) {
+      console.error('Error updating artwork:', err);
+      // You might want to show an error message to the user here
+    }
   };
 
-  const selectedLicenseOption = artwork.licenseOptions.find(option => option.id === selectedLicense);
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-black pt-20 flex justify-center items-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-white"></div>
+      </div>
+    );
+  }
 
-  const handleLike = () => {
-    setIsLiked(!isLiked);
-  };
+  if (error || !artwork) {
+    return (
+      <div className="min-h-screen bg-black pt-20 px-4">
+        <div className="max-w-6xl mx-auto text-center py-12">
+          <h2 className="text-2xl text-white mb-4">Error</h2>
+          <p className="text-red-400">{error || 'Artwork not found'}</p>
+          <button
+            onClick={() => navigate(-1)}
+            className="mt-6 px-6 py-3 bg-white text-black rounded-lg hover:bg-white/90 transition-colors"
+          >
+            Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const isArtist = user?.id === artwork.artist_id;
 
   return (
-    <div className="pt-20">
-      <div className="max-w-7xl mx-auto px-4 py-12 sm:px-6 lg:px-8">
-        <Link 
-          to="/explore" 
-          className="inline-flex items-center text-gray-400 hover:text-white mb-8"
+    <div className="min-h-screen bg-black pt-20 px-4">
+      <div className="max-w-6xl mx-auto">
+        <button
+          onClick={() => navigate(-1)}
+          className="mb-8 inline-flex items-center gap-2 text-white hover:text-white/80 transition-colors"
         >
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to Explore
-        </Link>
-        
+          <ArrowLeft className="w-5 h-5" />
+          Back
+        </button>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
           {/* Artwork Image */}
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.5 }}
-            className="relative aspect-square overflow-hidden rounded-2xl"
+            className="relative aspect-square rounded-2xl overflow-hidden bg-black/40 border border-white/10"
           >
-            <img 
-              src={artwork.imageUrl} 
-              alt={artwork.title} 
-              className="w-full h-full object-cover" 
+            <img
+              src={artwork.image_url}
+              alt={artwork.title}
+              className="w-full h-full object-cover"
             />
-            
-            {/* Image protective overlay to prevent easy saving */}
-            <div className="absolute inset-0 bg-transparent pointer-events-none"></div>
           </motion.div>
-          
+
           {/* Artwork Details */}
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-            className="space-y-8"
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.5 }}
+            className="flex flex-col"
           >
-            <div>
-              <h1 className="text-4xl font-bold text-white">{artwork.title}</h1>
-              <Link to={`/artists/${artwork.artist.name.toLowerCase().replace(' ', '-')}`} className="text-gray-300 hover:text-white text-lg">
-                by {artwork.artist.name}
-              </Link>
-            </div>
-            
-            <p className="text-gray-300 leading-relaxed">
-              {artwork.description}
-            </p>
-            
-            <div className="grid grid-cols-2 gap-y-4">
+            <div className="flex justify-between items-start">
               <div>
-                <p className="text-gray-400 text-sm">Creation Date</p>
-                <p className="text-white">{new Date(artwork.createdAt).toLocaleDateString()}</p>
-              </div>
-              <div>
-                <p className="text-gray-400 text-sm">Medium</p>
-                <p className="text-white">{artwork.medium}</p>
-              </div>
-              <div>
-                <p className="text-gray-400 text-sm">Dimensions</p>
-                <p className="text-white">{artwork.dimensions}</p>
-              </div>
-              <div>
-                <p className="text-gray-400 text-sm">Edition</p>
-                <p className="text-white">{artwork.edition}</p>
-              </div>
-            </div>
-            
-            <div className="pt-6 border-t border-white/10">
-              <div className="flex justify-between items-center mb-6">
-                <div>
-                  <p className="text-gray-400 text-sm">Current Price</p>
-                  <p className="text-3xl font-bold text-white">${artwork.price}</p>
-                </div>
-                <div className="flex space-x-3">
-                  <motion.button 
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={handleLike}
-                    className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                      isLiked 
-                        ? 'bg-red-500 text-white' 
-                        : 'bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white'
-                    } border border-white/10 transition-colors duration-300`}
+                <h1 className="text-4xl font-bold text-white mb-4">{artwork.title}</h1>
+                <div className="flex items-center gap-3">
+                  <Link
+                    to={`/profile/${artwork.artist_id}`}
+                    className="flex items-center gap-4 mb-6 group"
                   >
-                    <Heart className="w-5 h-5" fill={isLiked ? "currentColor" : "none"} />
-                  </motion.button>
-                  <motion.button 
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="w-10 h-10 rounded-full flex items-center justify-center bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white border border-white/10 transition-colors duration-300"
-                  >
-                    <Share2 className="w-5 h-5" />
-                  </motion.button>
+                    <div className="w-12 h-12 rounded-full overflow-hidden">
+                      {artwork.artist.avatar_url ? (
+                        <img
+                          src={artwork.artist.avatar_url}
+                          alt={artwork.artist.full_name || artwork.artist.username}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-white/10 flex items-center justify-center">
+                          <span className="text-white/50 text-xl">
+                            {(artwork.artist.full_name || artwork.artist.username)[0].toUpperCase()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="text-white font-medium group-hover:text-white/80 transition-colors">
+                        {artwork.artist.full_name || artwork.artist.username}
+                      </h3>
+                      <p className="text-gray-400">@{artwork.artist.username}</p>
+                    </div>
+                  </Link>
                 </div>
               </div>
-              
-              <div className="flex gap-4">
-                <motion.button 
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  className="flex-1 py-3 backdrop-blur-md bg-white/90 text-black rounded-lg font-medium hover:bg-white transition-all duration-300 shadow-[0_0_15px_rgba(255,255,255,0.3)]"
+              {isArtist && (
+                <button
+                  onClick={() => setIsEditModalOpen(true)}
+                  className="p-2 rounded-lg border border-white/10 hover:bg-white/10 transition-colors"
                 >
+                  <Edit2 size={20} />
+                </button>
+              )}
+            </div>
+            
+            {/* Price */}
+            <div className="mb-6">
+              <p className="text-gray-400">Price</p>
+              <p className="text-3xl font-bold text-white">${artwork.price.toFixed(2)}</p>
+            </div>
+
+            {/* Description */}
+            <div className="mb-8">
+              <h3 className="text-white font-medium mb-2">Description</h3>
+              <p className="text-gray-400 whitespace-pre-wrap">{artwork.description}</p>
+            </div>
+
+            {/* Tags */}
+            {artwork.tags && artwork.tags.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {artwork.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="px-3 py-1 rounded-full bg-white/10 text-sm"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex gap-4 mt-auto">
+              {user && user.id !== artwork.artist_id && (
+                <button className="flex-1 bg-white text-black px-6 py-3 rounded-lg font-medium hover:bg-white/90 transition-colors flex items-center justify-center gap-2">
+                  <ShoppingCart className="w-5 h-5" />
                   Buy Now
-                </motion.button>
-                <motion.button 
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  className="px-6 py-3 flex items-center justify-center backdrop-blur-md bg-white/5 border border-white/20 text-white rounded-lg hover:bg-white/10 transition-all duration-300"
-                >
-                  <Download className="w-5 h-5 mr-2" />
-                  Preview
-                </motion.button>
-              </div>
+                </button>
+              )}
+              <button className="px-6 py-3 rounded-lg font-medium border border-white/10 text-white hover:bg-white/10 transition-colors flex items-center justify-center gap-2">
+                <Heart className="w-5 h-5" />
+                Like
+              </button>
+              <button className="px-6 py-3 rounded-lg font-medium border border-white/10 text-white hover:bg-white/10 transition-colors flex items-center justify-center gap-2">
+                <Share2 className="w-5 h-5" />
+                Share
+              </button>
             </div>
           </motion.div>
         </div>
       </div>
 
-      {/* Additional sections could be added here: reviews, similar artwork, etc. */}
+      <EditArtworkModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        artwork={artwork}
+        onSave={handleEdit}
+      />
     </div>
   );
 };

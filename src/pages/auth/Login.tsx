@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -7,27 +7,61 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
-  const { signIn } = useAuth();
+  const location = useLocation();
+  const { user, signIn } = useAuth();
 
+  // Redirect to profile if already logged in
+  useEffect(() => {
+    if (user) {
+      navigate('/profile', { replace: true });
+    }
+  }, [user, navigate]);
+
+  // Check for query parameters
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const verified = params.get('verified');
+    
+    if (verified === 'true') {
+      setSuccess('Your email has been verified. You can now sign in.');
+    }
+    
+    // Clean the URL
+    if (verified === 'true' && window.history.replaceState) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, [location]);
+
+  // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!email || !password) {
+      setError('Please enter both email and password');
+      return;
+    }
+    
+    if (isLoading) return;
+    
     setError(null);
+    setSuccess(null);
     setIsLoading(true);
-
+    
     try {
-      const { error, data } = await signIn(email, password);
+      const { error } = await signIn(email, password);
       
       if (error) {
         setError(error.message);
         return;
       }
       
-      if (data?.user) {
-        navigate('/profile');
-      }
+      setSuccess('Sign in successful! Redirecting...');
+      
     } catch (err) {
+      console.error('Unexpected login error:', err);
       setError('An unexpected error occurred. Please try again.');
     } finally {
       setIsLoading(false);
@@ -49,6 +83,12 @@ const Login = () => {
             {error}
           </div>
         )}
+
+        {success && (
+          <div className="mb-4 p-3 bg-green-500/20 border border-green-500/50 rounded text-green-200 text-sm">
+            {success}
+          </div>
+        )}
         
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
@@ -58,38 +98,43 @@ const Login = () => {
             <input
               id="email"
               type="email"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full px-4 py-3 bg-black border border-white/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-white/40 text-white"
+              disabled={isLoading}
+              className="w-full px-4 py-3 bg-black border border-white/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-white/40 text-white disabled:opacity-60"
               placeholder="Enter your email"
             />
           </div>
           
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <label htmlFor="password" className="text-sm font-medium text-white">
-                Password
-              </label>
-              <Link to="/forgot-password" className="text-xs text-gray-400 hover:text-white">
-                Forgot password?
-              </Link>
-            </div>
+            <label htmlFor="password" className="block text-sm font-medium mb-2 text-white">
+              Password
+            </label>
             <input
               id="password"
               type="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full px-4 py-3 bg-black border border-white/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-white/40 text-white"
+              disabled={isLoading}
+              className="w-full px-4 py-3 bg-black border border-white/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-white/40 text-white disabled:opacity-60"
               placeholder="Enter your password"
             />
           </div>
           
+          <div className="flex justify-end">
+            <Link to="/forgot-password" className="text-sm text-gray-400 hover:text-white">
+              Forgot password?
+            </Link>
+          </div>
+          
           <button
             type="submit"
-            disabled={isLoading}
-            className={`w-full py-3 px-6 bg-white text-black font-medium rounded-lg transition-opacity ${isLoading ? 'opacity-70 cursor-not-allowed' : 'hover:opacity-90'}`}
+            disabled={isLoading || !email || !password}
+            className={`w-full py-3 px-6 bg-white text-black font-medium rounded-lg transition-opacity ${isLoading || !email || !password ? 'opacity-70 cursor-not-allowed' : 'hover:opacity-90'}`}
           >
             {isLoading ? (
               <span className="flex items-center justify-center">
@@ -97,7 +142,7 @@ const Login = () => {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                Signing in...
+                Signing In...
               </span>
             ) : (
               'Sign In'
@@ -109,45 +154,8 @@ const Login = () => {
           <p className="text-sm text-gray-400">
             Don't have an account?{' '}
             <Link to="/register" className="text-white hover:underline">
-              Sign up
+              Create account
             </Link>
-          </p>
-        </div>
-
-        {/* Demo Accounts */}
-        <div className="mt-8 pt-6 border-t border-white/10">
-          <p className="text-sm text-gray-400 mb-3 text-center">Demo accounts</p>
-          <div className="grid grid-cols-1 gap-2">
-            <button 
-              onClick={() => {
-                setEmail('user@example.com');
-                setPassword('password123');
-              }}
-              className="py-2 px-3 bg-white/5 border border-white/10 rounded text-sm text-white hover:bg-white/10 transition-colors"
-            >
-              Buyer: user@example.com
-            </button>
-            <button 
-              onClick={() => {
-                setEmail('artist@example.com');
-                setPassword('password123');
-              }}
-              className="py-2 px-3 bg-white/5 border border-white/10 rounded text-sm text-white hover:bg-white/10 transition-colors"
-            >
-              Seller: artist@example.com
-            </button>
-            <button 
-              onClick={() => {
-                setEmail('admin@example.com');
-                setPassword('password123');
-              }}
-              className="py-2 px-3 bg-white/5 border border-white/10 rounded text-sm text-white hover:bg-white/10 transition-colors"
-            >
-              Admin: admin@example.com
-            </button>
-          </div>
-          <p className="text-xs text-gray-500 mt-2 text-center">
-            (Password for all: "password123")
           </p>
         </div>
       </motion.div>

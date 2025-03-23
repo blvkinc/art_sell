@@ -42,10 +42,19 @@ const Register = () => {
       }
       
       if (data?.user) {
-        setSuccessMessage(`Account created successfully!`);
-        setTimeout(() => {
-          navigate('/profile');
-        }, 1500);
+        // Check if email confirmation is required - if there's no session, email verification is needed
+        const hasSession = !!data.session;
+        
+        if (!hasSession) {
+          setSuccessMessage(
+            `Account created successfully! Please check your email for a verification link. You'll need to verify your email before you can sign in.`
+          );
+        } else {
+          setSuccessMessage(`Account created successfully! You'll be redirected to your profile in a moment.`);
+          setTimeout(() => {
+            navigate('/profile');
+          }, 2500);
+        }
       }
     } catch (err) {
       setError('An unexpected error occurred. Please try again.');

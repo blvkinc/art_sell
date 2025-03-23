@@ -1,13 +1,8 @@
-import { ReactNode } from 'react';
-import { Navigate } from 'react-router-dom';
+import React from 'react';
+import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
-interface ProtectedRouteProps {
-  children: ReactNode;
-  requiredRole?: string;
-}
-
-const ProtectedRoute = ({ children, requiredRole }: ProtectedRouteProps) => {
+const ProtectedRoute = () => {
   const { user, isLoading } = useAuth();
 
   if (isLoading) {
@@ -21,20 +16,10 @@ const ProtectedRoute = ({ children, requiredRole }: ProtectedRouteProps) => {
 
   // Not authenticated
   if (!user) {
-    return <Navigate to="/login" />;
+    return <Navigate to="/login" replace />;
   }
 
-  // Check for required role if specified
-  if (requiredRole) {
-    // You'll need to implement your own role-checking logic
-    // This assumes your user object has a 'role' property
-    const userRoles = (user.app_metadata?.roles || []) as string[];
-    if (!userRoles.includes(requiredRole)) {
-      return <Navigate to="/" />;
-    }
-  }
-  
-  return <>{children}</>;
+  return <Outlet />;
 };
 
 export default ProtectedRoute; 
